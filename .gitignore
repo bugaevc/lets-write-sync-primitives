@@ -1,0 +1,8 @@
+*.d
+*.o
+*.a
+*.so
+*.gch
+*.pch
+
+build*
