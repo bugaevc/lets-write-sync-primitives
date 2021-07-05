@@ -168,6 +168,12 @@ here):
   and then re-acquire it for writing; and be prepared that something might have
   changed while you were not holding the lock.
 
+  That being said, you can call `lock.try_upgrade()` to try and upgrade the lock
+  from reading to writing, which is slightly faster than dropping and
+  re-acquring the lock and, if successfull, guarantees that the lock has been
+  held "at least for reading" the whole time. It is also always possible to
+  downgrade a lock from writing to reading.
+
 A readers-writer lock establishes a happens-before relationship between a
 writer unlocking the lock and a reader or a writer subsequently locking the
 lock, as well as between a reader or a writer unlocking the lock and a writer
@@ -206,6 +212,12 @@ RWLock lock;
 value_t get(key_t key) {
     lock.lock_read();
     value_t value = cache[key];
+    // If there's no value and we're
+    // the only reader, proceed to
+    // calculating the value.
+    if (!value && lock.try_upgrade()) {
+        goto calculate;
+    }
     lock.unlock_read();
 
     if (value) {
@@ -217,6 +229,7 @@ value_t get(key_t key) {
     // put it there, so recheck.
     value = cache[key];
     if (!value) {
+calculate:
         value = cache[key] = calculate_value(key);
     }
     lock.unlock_write();

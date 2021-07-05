@@ -26,6 +26,7 @@ void RWLock::lock_read() {
         }
         // We're going to wait, so record the fact that we're waiting.
         if (!(state2 & need_to_wake_bit)) {
+            assert(state2 == locked_write_bit);
             uint32_t desired = locked_write_bit | need_to_wake_bit;
             bool have_exchanged = state.compare_exchange_weak(
                 state2, desired, std::memory_order_relaxed
@@ -58,6 +59,7 @@ void RWLock::lock_write() {
     // Alrigth, the fast way didn't work, let's try the slow way.
     while (true) {
         if ((state2 & ~need_to_wake_bit) == 0) {
+            assert(state2 == 0);
             // Try to grab it.
             have_exchanged = state.compare_exchange_strong(
                state2, locked_write_bit | need_to_wake_bit,
@@ -110,6 +112,43 @@ bool RWLock::try_lock_write() {
        std::memory_order_acquire, std::memory_order_relaxed
     );
     return have_locked;
+}
+
+bool RWLock::try_upgrade() {
+    uint32_t state2 = 1;
+    uint32_t desired = locked_write_bit;
+    bool have_exchanged = state.compare_exchange_strong(
+        state2, desired,
+        std::memory_order_acquire, std::memory_order_relaxed
+    );
+    assert(!(state2 & locked_write_bit));
+    if (have_exchanged) {
+        return true;
+    }
+    if (state2 == (1 | need_to_wake_bit)) {
+        // We can handle this situation too.
+        // No new readers (or writers) can enter the critical
+        // section if there are writers waiting.
+        state2 = state.exchange(
+            locked_write_bit | need_to_wake_bit,
+            std::memory_order_acquire
+        );
+        assert(state2 == (1 | need_to_wake_bit));
+        return true;
+    }
+    return false;
+}
+
+void RWLock::downgrade() {
+    uint32_t state2 = state.exchange(1, std::memory_order_release);
+    assert(state2 & locked_write_bit);
+    uint32_t count = state2 & ~need_to_wake_bit & ~locked_write_bit;
+    assert(count == 0);
+    (void) count;
+    if (UNLIKELY(state2 & need_to_wake_bit)) {
+        // Wake all the readers.
+        futex_wake_bitset((const uint32_t *) &state, INT_MAX, reader_mask);
+    }
 }
 
 void RWLock::unlock_read() {

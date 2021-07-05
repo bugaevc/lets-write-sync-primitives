@@ -43,5 +43,10 @@ int main() {
     assert(rwlock.try_lock_write());
     assert(!rwlock.try_lock_write());
     assert(!rwlock.try_lock_read());
+    rwlock.downgrade();
+    assert(rwlock.try_upgrade());
+    rwlock.downgrade();
+    rwlock.lock_read();
+    assert(!rwlock.try_upgrade());
     assert(v.size() == std::min(num_threads, num_times / write_ratio));
 }
