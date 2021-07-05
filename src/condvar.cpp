@@ -33,24 +33,26 @@ void CondVar::notify_one() {
     uint32_t state2 = state.fetch_add(
         increment, std::memory_order_relaxed
     ) + increment;
-    if (UNLIKELY(state2 & need_to_wake_one_bit)) {
-        // Wake someone, and clear the need_to_wake_one_bit if there was nobody
-        // for us to wake, to take the fast path the next time. Since we only
-        // learn whether there has been somebody waiting or not after we have
-        // tried to wake them, it would make sense for us to clear the bit after
-        // trying to wake someone up and seeing there was nobody waiting; but
-        // that would race with somebody else setting the bit. Therefore, we do
-        // it like this: attempt to clear the bit first...
-        state.compare_exchange_weak(
-            state2, state2 & ~need_to_wake_one_bit,
-            std::memory_order_relaxed
-        );
-        // ...try to wake someone...
-        int woken = futex_wake((const uint32_t *) &state, 1);
-        // ...and if we have woken someone, put the bit back.
-        if (woken) {
-            state.fetch_or(need_to_wake_one_bit, std::memory_order_relaxed);
-        }
+    if (LIKELY(!(state2 & need_to_wake_one_bit))) {
+        return;
+    }
+    // Wake someone, and clear the need_to_wake_one_bit if there was nobody for
+    // us to wake, to take the fast path the next time. Since we only learn
+    // whether there has been somebody waiting or not after we have tried to
+    // wake them, it would make sense for us to clear the bit after trying to
+    // wake someone up and seeing there was nobody waiting; but that would race
+    // with somebody else setting the bit. Therefore, we do it like this:
+    // attempt to clear the bit first...
+    state2 = state.fetch_and(~need_to_wake_one_bit, std::memory_order_relaxed);
+    if (LIKELY(!(state2 & need_to_wake_one_bit))) {
+        // Somebody else has handled it already.
+        return;
+    }
+    // ...try to wake someone...
+    int woken = futex_wake((const uint32_t *) &state, 1);
+    // ...and if we have woken someone, put the bit back.
+    if (woken) {
+        state.fetch_or(need_to_wake_one_bit, std::memory_order_relaxed);
     }
 }
 
