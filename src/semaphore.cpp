@@ -60,7 +60,7 @@ void Semaphore::down() {
         responsible_for_waking = true;
         futex_wait((const uint32_t *) &state, state2, nullptr);
         // This is the state we will probably see upon being waked:
-        state2 = 1 | need_to_wake_bit;
+        state2 = 1;
         // If we guess this wrong, the compare_exchange() above
         // will fail, we'll load the actual value and reevaluate.
     }
